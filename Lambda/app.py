@@ -12,10 +12,10 @@ def lambda_handler(event, context):
         Entries=[
             {
                 "Source": "custom.netflix.cicd",
-                "DetailType": "cicd-deploy-success",
+                "DetailType": "TriggerGlueWorkflow",
                 "Detail": json.dumps({
-                    "message": "Deployment completed, trigger Glue Workflow",
-                    "event": event
+                    "message": "Lambda triggered EventBridge",
+                    "status": "success"
                 }),
                 "EventBusName": EVENT_BUS_NAME
             }
@@ -25,7 +25,7 @@ def lambda_handler(event, context):
     return {
         "statusCode": 200,
         "body": json.dumps({
-            "message": "Custom event sent to EventBridge",
+            "message": "Event sent to EventBridge successfully",
             "response": response
         })
     }

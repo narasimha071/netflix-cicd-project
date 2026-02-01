@@ -1,0 +1,353 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Netflix DataLake Automation - S3 -> EventBridge -> Glue Workflows (Silver + Gold)
+
+Parameters:
+  BucketName:
+    Type: String
+    Default: netflix-raw-123456-dev
+
+  RawPrefix:
+    Type: String
+    Default: netflix-raw/
+
+  SilverPrefix:
+    Type: String
+    Default: netflix/silver/
+
+  GoldPrefix:
+    Type: String
+    Default: netflix/gold/
+
+  SilverDatabase:
+    Type: String
+    Default: netflix_db
+
+  GoldDatabase:
+    Type: String
+    Default: gold_db
+
+  SilverTableName:
+    Type: String
+    Default: netflix_raw
+
+  GoldTableName:
+    Type: String
+    Default: silver
+
+  SilverJobName:
+    Type: String
+    Default: netflix-sliver-job
+
+  GoldJobName:
+    Type: String
+    Default: netflix-gold-job
+
+  SilverCrawlerName:
+    Type: String
+    Default: sliver_converion_crawler
+
+  GoldCrawlerName:
+    Type: String
+    Default: gold_conversion_crawler
+
+  SilverWorkflowName:
+    Type: String
+    Default: Silver_workflow
+
+  GoldWorkflowName:
+    Type: String
+    Default: Gold_workflow
+
+  ScriptLocationPrefix:
+    Type: String
+    Default: scripts/
+
+  SilverJobScriptKey:
+    Type: String
+    Default: scripts/sliver_job.py
+
+  GoldJobScriptKey:
+    Type: String
+    Default: scripts/gold_job.py
+
+Resources:
+
+  # -----------------------------
+  # IAM Role for Glue
+  # -----------------------------
+  GlueServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: NetflixGlueServiceRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: NetflixGlueS3Access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub arn:aws:s3:::${BucketName}
+                  - !Sub arn:aws:s3:::${BucketName}/*
+
+  # -----------------------------
+  # Glue Databases
+  # -----------------------------
+  SilverGlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Ref SilverDatabase
+
+  GoldGlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Ref GoldDatabase
+
+  # -----------------------------
+  # Silver Crawler
+  # -----------------------------
+  SilverCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: !Ref SilverCrawlerName
+      Role: !GetAtt GlueServiceRole.Arn
+      DatabaseName: !Ref SilverDatabase
+      Targets:
+        S3Targets:
+          - Path: !Sub s3://${BucketName}/${RawPrefix}
+      TablePrefix: ""
+      SchemaChangePolicy:
+        UpdateBehavior: UPDATE_IN_DATABASE
+        DeleteBehavior: DEPRECATE_IN_DATABASE
+
+  # -----------------------------
+  # Gold Crawler
+  # -----------------------------
+  GoldCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: !Ref GoldCrawlerName
+      Role: !GetAtt GlueServiceRole.Arn
+      DatabaseName: !Ref GoldDatabase
+      Targets:
+        S3Targets:
+          - Path: !Sub s3://${BucketName}/${SilverPrefix}
+      TablePrefix: ""
+      SchemaChangePolicy:
+        UpdateBehavior: UPDATE_IN_DATABASE
+        DeleteBehavior: DEPRECATE_IN_DATABASE
+
+  # -----------------------------
+  # Silver Glue Job
+  # -----------------------------
+  SilverGlueJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Ref SilverJobName
+      Role: !GetAtt GlueServiceRole.Arn
+      GlueVersion: "4.0"
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation: !Sub s3://${BucketName}/${SilverJobScriptKey}
+      DefaultArguments:
+        "--job-language": "python"
+        "--enable-continuous-cloudwatch-log": "true"
+        "--enable-metrics": "true"
+        "--enable-spark-ui": "true"
+        "--spark-event-logs-path": !Sub s3://${BucketName}/sparkHistoryLogs/
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      WorkerType: G.1X
+      NumberOfWorkers: 2
+
+  # -----------------------------
+  # Gold Glue Job
+  # -----------------------------
+  GoldGlueJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Ref GoldJobName
+      Role: !GetAtt GlueServiceRole.Arn
+      GlueVersion: "4.0"
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation: !Sub s3://${BucketName}/${GoldJobScriptKey}
+      DefaultArguments:
+        "--job-language": "python"
+        "--enable-continuous-cloudwatch-log": "true"
+        "--enable-metrics": "true"
+        "--enable-spark-ui": "true"
+        "--spark-event-logs-path": !Sub s3://${BucketName}/sparkHistoryLogs/
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      WorkerType: G.1X
+      NumberOfWorkers: 2
+
+  # -----------------------------
+  # Glue Workflow Silver
+  # -----------------------------
+  SilverWorkflow:
+    Type: AWS::Glue::Workflow
+    Properties:
+      Name: !Ref SilverWorkflowName
+
+  # Workflow Triggers for Silver
+  SilverTriggerCrawler:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: SilverTriggerCrawler
+      Type: ON_DEMAND
+      WorkflowName: !Ref SilverWorkflowName
+      Actions:
+        - CrawlerName: !Ref SilverCrawlerName
+
+  SilverTriggerJob:
+    Type: AWS::Glue::Trigger
+    DependsOn: SilverCrawler
+    Properties:
+      Name: SilverTriggerJob
+      Type: CONDITIONAL
+      WorkflowName: !Ref SilverWorkflowName
+      StartOnCreation: true
+      Predicate:
+        Conditions:
+          - LogicalOperator: EQUALS
+            CrawlerName: !Ref SilverCrawlerName
+            CrawlState: SUCCEEDED
+      Actions:
+        - JobName: !Ref SilverJobName
+
+  # -----------------------------
+  # Glue Workflow Gold
+  # -----------------------------
+  GoldWorkflow:
+    Type: AWS::Glue::Workflow
+    Properties:
+      Name: !Ref GoldWorkflowName
+
+  GoldTriggerCrawler:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: GoldTriggerCrawler
+      Type: ON_DEMAND
+      WorkflowName: !Ref GoldWorkflowName
+      Actions:
+        - CrawlerName: !Ref GoldCrawlerName
+
+  GoldTriggerJob:
+    Type: AWS::Glue::Trigger
+    DependsOn: GoldCrawler
+    Properties:
+      Name: GoldTriggerJob
+      Type: CONDITIONAL
+      WorkflowName: !Ref GoldWorkflowName
+      StartOnCreation: true
+      Predicate:
+        Conditions:
+          - LogicalOperator: EQUALS
+            CrawlerName: !Ref GoldCrawlerName
+            CrawlState: SUCCEEDED
+      Actions:
+        - JobName: !Ref GoldJobName
+
+  # -----------------------------
+  # IAM Role for EventBridge to start Glue Workflows
+  # -----------------------------
+  EventBridgeInvokeGlueRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: NetflixEventBridgeInvokeGlueRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AllowStartGlueWorkflow
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - glue:StartWorkflowRun
+                Resource:
+                  - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:workflow/${SilverWorkflowName}
+                  - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:workflow/${GoldWorkflowName}
+
+  # -----------------------------
+  # EventBridge Rule #1 RAW Upload -> Silver Workflow
+  # -----------------------------
+  RawUploadTriggerSilverRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: RawUploadTriggerSilverRule
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - Object Created
+        detail:
+          bucket:
+            name:
+              - !Ref BucketName
+          object:
+            key:
+              - prefix: !Ref RawPrefix
+      Targets:
+        - Arn: !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:workflow/${SilverWorkflowName}
+          Id: StartSilverWorkflow
+          RoleArn: !GetAtt EventBridgeInvokeGlueRole.Arn
+
+  # -----------------------------
+  # EventBridge Rule #2 Silver Marker -> Gold Workflow
+  # -----------------------------
+  SilverSuccessTriggerGoldRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: SilverSuccessTriggerGoldRule
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - Object Created
+        detail:
+          bucket:
+            name:
+              - !Ref BucketName
+          object:
+            key:
+              - prefix: !Sub ${SilverPrefix}_SUCCESS
+      Targets:
+        - Arn: !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:workflow/${GoldWorkflowName}
+          Id: StartGoldWorkflow
+          RoleArn: !GetAtt EventBridgeInvokeGlueRole.Arn
+
+Outputs:
+  SilverWorkflowOut:
+    Value: !Ref SilverWorkflowName
+    Description: Silver Glue Workflow Name
+
+  GoldWorkflowOut:
+    Value: !Ref GoldWorkflowName
+    Description: Gold Glue Workflow Name
