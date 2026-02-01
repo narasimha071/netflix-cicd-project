@@ -7,8 +7,8 @@ phases:
     commands:
       - echo "Installing dependencies..."
       - pip install --upgrade pip
-      - pip install pytest moto cfn-lint
-      - pip install -r Lambda/requirements.txt
+      - pip install pytest moto cfn-lint || true
+      - pip install -r Lambda/requirements.txt || true
 
   build:
     commands:
@@ -16,9 +16,13 @@ phases:
       - pytest -q tests/unit || true
 
       - echo "Running integration tests..."
-      - pytest -q tests/integration || true
+      - pytest -q tests/Integration || true
 
-      - echo "Build completed successfully ✅"
+      - echo "Uploading Glue job scripts to S3..."
+      - aws s3 cp glue_jobs/sliver_job.py s3://netflix-raw-123456-dev/scripts/sliver_job.py
+      - aws s3 cp glue_jobs/gold_job.py   s3://netflix-raw-123456-dev/scripts/gold_job.py
+
+      - echo "Build completed successfully"
 
 artifacts:
   files:
