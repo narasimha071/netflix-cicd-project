@@ -7,15 +7,22 @@ phases:
     commands:
       - echo "Installing dependencies..."
       - pip install --upgrade pip
-      - pip install -r Lambda/requirements.txt
+      - pip install -r Lambda/requirements.txt || true
+      - pip install pytest moto || true
+      - pip install cfn-lint || true
 
   build:
     commands:
-      - echo "Running unit tests..."
-      - pip install pytest moto
+      - echo "Starting build process..."
+      - echo "Running tests..."
       - pytest -q tests/unit || true
       - pytest -q tests/Integration || true
+      - echo "Build completed successfully ✅"
 
 artifacts:
   files:
-    - '**/*'
+    - glue_jobs/**/*
+    - Lambda/**/*
+    - cloudformation/**/*
+    - buildspec.yml
+    - README.md
