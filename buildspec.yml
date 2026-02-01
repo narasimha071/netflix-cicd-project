@@ -7,16 +7,18 @@ phases:
     commands:
       - echo "Installing dependencies..."
       - pip install --upgrade pip
-      - pip install -r Lambda/requirements.txt || true
+      - pip install -r Lambda/requirements.txt
       - pip install pytest moto || true
       - pip install cfn-lint || true
 
   build:
     commands:
-      - echo "Starting build process..."
-      - echo "Running tests..."
+      - echo "Running unit tests..."
       - pytest -q tests/unit || true
+
+      - echo "Running integration tests..."
       - pytest -q tests/Integration || true
+
       - echo "Build completed successfully ✅"
 
 artifacts:
