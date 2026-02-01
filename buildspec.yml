@@ -7,9 +7,8 @@ phases:
     commands:
       - echo "Installing dependencies..."
       - pip install --upgrade pip
+      - pip install pytest moto cfn-lint
       - pip install -r Lambda/requirements.txt
-      - pip install pytest moto || true
-      - pip install cfn-lint || true
 
   build:
     commands:
@@ -17,7 +16,7 @@ phases:
       - pytest -q tests/unit || true
 
       - echo "Running integration tests..."
-      - pytest -q tests/Integration || true
+      - pytest -q tests/integration || true
 
       - echo "Build completed successfully ✅"
 
