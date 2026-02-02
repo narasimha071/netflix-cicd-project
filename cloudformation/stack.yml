@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Netflix DataLake Automation - S3 -> CloudTrail -> EventBridge -> Glue Workflows (Silver + Gold)
+Description: Netflix DataLake Automation - S3 -> EventBridge -> Glue Workflows (Silver + Gold)
 
 Parameters:
   BucketName:
@@ -20,15 +20,23 @@ Parameters:
 
   SilverDatabase:
     Type: String
-    Default: silver_db
+    Default: netflix_db
 
   GoldDatabase:
     Type: String
-    Default: gold_db_new
+    Default: gold_db
+
+  SilverTableName:
+    Type: String
+    Default: netflix_raw
+
+  GoldTableName:
+    Type: String
+    Default: silver
 
   SilverJobName:
     Type: String
-    Default: netflix-silver-job
+    Default: netflix-sliver-job
 
   GoldJobName:
     Type: String
@@ -36,15 +44,27 @@ Parameters:
 
   SilverCrawlerName:
     Type: String
-    Default: silver_conversion_crawler
+    Default: sliver_converion_crawler
 
   GoldCrawlerName:
     Type: String
     Default: gold_conversion_crawler
 
+  SilverWorkflowName:
+    Type: String
+    Default: Silver_workflow
+
+  GoldWorkflowName:
+    Type: String
+    Default: Gold_workflow
+
+  ScriptLocationPrefix:
+    Type: String
+    Default: scripts/
+
   SilverJobScriptKey:
     Type: String
-    Default: scripts/silver_job.py
+    Default: scripts/sliver_job.py
 
   GoldJobScriptKey:
     Type: String
@@ -58,7 +78,7 @@ Resources:
   GlueServiceRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "${AWS::StackName}-NetflixGlueServiceRole"
+      RoleName: NetflixGlueServiceRole
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -101,33 +121,35 @@ Resources:
         Name: !Ref GoldDatabase
 
   # -----------------------------
-  # Silver Crawler (Raw -> Silver schema)
+  # Silver Crawler
   # -----------------------------
   SilverCrawler:
     Type: AWS::Glue::Crawler
     Properties:
-      Name: !Sub "${AWS::StackName}-${SilverCrawlerName}"
+      Name: !Ref SilverCrawlerName
       Role: !GetAtt GlueServiceRole.Arn
       DatabaseName: !Ref SilverDatabase
       Targets:
         S3Targets:
           - Path: !Sub s3://${BucketName}/${RawPrefix}
+      TablePrefix: ""
       SchemaChangePolicy:
         UpdateBehavior: UPDATE_IN_DATABASE
         DeleteBehavior: DEPRECATE_IN_DATABASE
 
   # -----------------------------
-  # Gold Crawler (Silver -> Gold schema)
+  # Gold Crawler
   # -----------------------------
   GoldCrawler:
     Type: AWS::Glue::Crawler
     Properties:
-      Name: !Sub "${AWS::StackName}-${GoldCrawlerName}"
+      Name: !Ref GoldCrawlerName
       Role: !GetAtt GlueServiceRole.Arn
       DatabaseName: !Ref GoldDatabase
       Targets:
         S3Targets:
           - Path: !Sub s3://${BucketName}/${SilverPrefix}
+      TablePrefix: ""
       SchemaChangePolicy:
         UpdateBehavior: UPDATE_IN_DATABASE
         DeleteBehavior: DEPRECATE_IN_DATABASE
@@ -138,7 +160,7 @@ Resources:
   SilverGlueJob:
     Type: AWS::Glue::Job
     Properties:
-      Name: !Sub "${AWS::StackName}-${SilverJobName}"
+      Name: !Ref SilverJobName
       Role: !GetAtt GlueServiceRole.Arn
       GlueVersion: "4.0"
       Command:
@@ -162,7 +184,7 @@ Resources:
   GoldGlueJob:
     Type: AWS::Glue::Job
     Properties:
-      Name: !Sub "${AWS::StackName}-${GoldJobName}"
+      Name: !Ref GoldJobName
       Role: !GetAtt GlueServiceRole.Arn
       GlueVersion: "4.0"
       Command:
@@ -186,32 +208,33 @@ Resources:
   SilverWorkflow:
     Type: AWS::Glue::Workflow
     Properties:
-      Name: !Sub "${AWS::StackName}-Silver_workflow"
+      Name: !Ref SilverWorkflowName
 
+  # Workflow Triggers for Silver
   SilverTriggerCrawler:
     Type: AWS::Glue::Trigger
     Properties:
-      Name: !Sub "${AWS::StackName}-SilverTriggerCrawler"
+      Name: SilverTriggerCrawler
       Type: ON_DEMAND
-      WorkflowName: !Sub "${AWS::StackName}-Silver_workflow"
+      WorkflowName: !Ref SilverWorkflowName
       Actions:
-        - CrawlerName: !Ref SilverCrawler
+        - CrawlerName: !Ref SilverCrawlerName
 
   SilverTriggerJob:
     Type: AWS::Glue::Trigger
     DependsOn: SilverCrawler
     Properties:
-      Name: !Sub "${AWS::StackName}-SilverTriggerJob"
+      Name: SilverTriggerJob
       Type: CONDITIONAL
-      WorkflowName: !Sub "${AWS::StackName}-Silver_workflow"
+      WorkflowName: !Ref SilverWorkflowName
       StartOnCreation: true
       Predicate:
         Conditions:
           - LogicalOperator: EQUALS
-            CrawlerName: !Ref SilverCrawler
+            CrawlerName: !Ref SilverCrawlerName
             CrawlState: SUCCEEDED
       Actions:
-        - JobName: !Ref SilverGlueJob
+        - JobName: !Ref SilverJobName
 
   # -----------------------------
   # Glue Workflow Gold
@@ -219,32 +242,32 @@ Resources:
   GoldWorkflow:
     Type: AWS::Glue::Workflow
     Properties:
-      Name: !Sub "${AWS::StackName}-Gold_workflow"
+      Name: !Ref GoldWorkflowName
 
   GoldTriggerCrawler:
     Type: AWS::Glue::Trigger
     Properties:
-      Name: !Sub "${AWS::StackName}-GoldTriggerCrawler"
+      Name: GoldTriggerCrawler
       Type: ON_DEMAND
-      WorkflowName: !Sub "${AWS::StackName}-Gold_workflow"
+      WorkflowName: !Ref GoldWorkflowName
       Actions:
-        - CrawlerName: !Ref GoldCrawler
+        - CrawlerName: !Ref GoldCrawlerName
 
   GoldTriggerJob:
     Type: AWS::Glue::Trigger
     DependsOn: GoldCrawler
     Properties:
-      Name: !Sub "${AWS::StackName}-GoldTriggerJob"
+      Name: GoldTriggerJob
       Type: CONDITIONAL
-      WorkflowName: !Sub "${AWS::StackName}-Gold_workflow"
+      WorkflowName: !Ref GoldWorkflowName
       StartOnCreation: true
       Predicate:
         Conditions:
           - LogicalOperator: EQUALS
-            CrawlerName: !Ref GoldCrawler
+            CrawlerName: !Ref GoldCrawlerName
             CrawlState: SUCCEEDED
       Actions:
-        - JobName: !Ref GoldGlueJob
+        - JobName: !Ref GoldJobName
 
   # -----------------------------
   # IAM Role for EventBridge to start Glue Workflows
@@ -252,7 +275,7 @@ Resources:
   EventBridgeInvokeGlueRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "${AWS::StackName}-NetflixEventBridgeInvokeGlueRole"
+      RoleName: NetflixEventBridgeInvokeGlueRole
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -269,131 +292,62 @@ Resources:
                 Action:
                   - glue:StartWorkflowRun
                 Resource:
-                  - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:workflow/${AWS::StackName}-Silver_workflow
-                  - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:workflow/${AWS::StackName}-Gold_workflow
+                  - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:workflow/${SilverWorkflowName}
+                  - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:workflow/${GoldWorkflowName}
 
   # -----------------------------
-  # CloudTrail Bucket for Logs
-  # -----------------------------
-  CloudTrailLogsBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-
-  CloudTrailLogsBucketPolicy:
-    Type: AWS::S3::BucketPolicy
-    Properties:
-      Bucket: !Ref CloudTrailLogsBucket
-      PolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Sid: AWSCloudTrailAclCheck
-            Effect: Allow
-            Principal:
-              Service: cloudtrail.amazonaws.com
-            Action: s3:GetBucketAcl
-            Resource: !Sub arn:aws:s3:::${CloudTrailLogsBucket}
-          - Sid: AWSCloudTrailWrite
-            Effect: Allow
-            Principal:
-              Service: cloudtrail.amazonaws.com
-            Action: s3:PutObject
-            Resource: !Sub arn:aws:s3:::${CloudTrailLogsBucket}/AWSLogs/${AWS::AccountId}/*
-            Condition:
-              StringEquals:
-                s3:x-amz-acl: bucket-owner-full-control
-
-  # -----------------------------
-  # CloudTrail: Enable S3 data events (required for EventBridge)
-  # -----------------------------
-  NetflixCloudTrail:
-    Type: AWS::CloudTrail::Trail
-    Properties:
-      TrailName: !Sub "${AWS::StackName}-S3DataEventsTrail"
-      IsLogging: true
-      S3BucketName: !Ref CloudTrailLogsBucket
-      IncludeGlobalServiceEvents: true
-      IsMultiRegionTrail: false
-      EnableLogFileValidation: true
-      EventSelectors:
-        - ReadWriteType: WriteOnly
-          IncludeManagementEvents: true
-          DataResources:
-            - Type: AWS::S3::Object
-              Values:
-                - !Sub arn:aws:s3:::${BucketName}/
-
-  # -----------------------------
-  # EventBridge Rule #1 RAW Upload -> Start Silver Workflow
+  # EventBridge Rule #1 RAW Upload -> Silver Workflow
   # -----------------------------
   RawUploadTriggerSilverRule:
     Type: AWS::Events::Rule
     Properties:
-      Name: !Sub "${AWS::StackName}-RawUploadTriggerSilverRule"
+      Name: RawUploadTriggerSilverRule
       EventPattern:
         source:
           - aws.s3
         detail-type:
-          - AWS API Call via CloudTrail
+          - Object Created
         detail:
-          eventSource:
-            - s3.amazonaws.com
-          eventName:
-            - PutObject
-            - CompleteMultipartUpload
-          requestParameters:
-            bucketName:
+          bucket:
+            name:
               - !Ref BucketName
+          object:
             key:
               - prefix: !Ref RawPrefix
       Targets:
-        - Arn: !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:workflow/${AWS::StackName}-Silver_workflow
+        - Arn: !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:workflow/${SilverWorkflowName}
           Id: StartSilverWorkflow
           RoleArn: !GetAtt EventBridgeInvokeGlueRole.Arn
 
   # -----------------------------
-  # EventBridge Rule #2 Silver _SUCCESS -> Start Gold Workflow
+  # EventBridge Rule #2 Silver Marker -> Gold Workflow
   # -----------------------------
   SilverSuccessTriggerGoldRule:
     Type: AWS::Events::Rule
     Properties:
-      Name: !Sub "${AWS::StackName}-SilverSuccessTriggerGoldRule"
+      Name: SilverSuccessTriggerGoldRule
       EventPattern:
         source:
           - aws.s3
         detail-type:
-          - AWS API Call via CloudTrail
+          - Object Created
         detail:
-          eventSource:
-            - s3.amazonaws.com
-          eventName:
-            - PutObject
-          requestParameters:
-            bucketName:
+          bucket:
+            name:
               - !Ref BucketName
+          object:
             key:
               - prefix: !Sub ${SilverPrefix}_SUCCESS
       Targets:
-        - Arn: !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:workflow/${AWS::StackName}-Gold_workflow
+        - Arn: !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:workflow/${GoldWorkflowName}
           Id: StartGoldWorkflow
           RoleArn: !GetAtt EventBridgeInvokeGlueRole.Arn
 
 Outputs:
   SilverWorkflowOut:
-    Value: !Sub "${AWS::StackName}-Silver_workflow"
+    Value: !Ref SilverWorkflowName
     Description: Silver Glue Workflow Name
 
   GoldWorkflowOut:
-    Value: !Sub "${AWS::StackName}-Gold_workflow"
+    Value: !Ref GoldWorkflowName
     Description: Gold Glue Workflow Name
-
-  RawRuleOut:
-    Value: !Ref RawUploadTriggerSilverRule
-    Description: EventBridge Rule for RAW Upload -> Silver
-
-  GoldRuleOut:
-    Value: !Ref SilverSuccessTriggerGoldRule
-    Description: EventBridge Rule for Silver Success -> Gold
