@@ -78,7 +78,7 @@ Resources:
   GlueServiceRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: NetflixGlueServiceRole
+      # RoleName removed - CloudFormation will auto-generate unique name
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -275,7 +275,7 @@ Resources:
   EventBridgeInvokeGlueRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: NetflixEventBridgeInvokeGlueRole
+      # RoleName removed - CloudFormation will auto-generate unique name
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -351,3 +351,11 @@ Outputs:
   GoldWorkflowOut:
     Value: !Ref GoldWorkflowName
     Description: Gold Glue Workflow Name
+  
+  GlueServiceRoleArn:
+    Value: !GetAtt GlueServiceRole.Arn
+    Description: ARN of the Glue Service Role
+  
+  EventBridgeRoleArn:
+    Value: !GetAtt EventBridgeInvokeGlueRole.Arn
+    Description: ARN of the EventBridge Role
