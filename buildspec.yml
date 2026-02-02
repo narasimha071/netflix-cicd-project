@@ -19,7 +19,7 @@ phases:
       - pytest -q tests/Integration || true
 
       - echo "Uploading Glue job scripts to S3..."
-      - aws s3 cp glue_jobs/sliver_job.py s3://netflix-raw-123456-dev/scripts/silver_job.py
+      - aws s3 cp glue_jobs/silver_job.py s3://netflix-raw-123456-dev/scripts/silver_job.py
       - aws s3 cp glue_jobs/gold_job.py   s3://netflix-raw-123456-dev/scripts/gold_job.py
 
       - echo "Build completed successfully"
