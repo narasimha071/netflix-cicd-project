@@ -20,11 +20,11 @@ Parameters:
 
   SilverDatabase:
     Type: String
-    Default: netflix_db
+    Default: silver_db
 
   GoldDatabase:
     Type: String
-    Default: gold_db
+    Default: gold_db_new
 
   SilverJobName:
     Type: String
