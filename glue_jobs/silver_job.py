@@ -36,8 +36,8 @@ SILVER_S3_PATH = "s3://netflix-raw-123456-dev/netflix/silver/"
 QUARANTINE_S3_PATH = "s3://netflix-raw-123456-dev/netflix/quarantine/"
 
 # ✅ Success markers (IMPORTANT)
-SILVER_SUCCESS_MARKER = "s3://netflix-raw-123456-dev/netflix/silver/_SUCCESS_MARKER/"
-QUARANTINE_SUCCESS_MARKER = "s3://netflix-raw-123456-dev/netflix/quarantine/_SUCCESS_MARKER/"
+SILVER_SUCCESS_MARKER = "s3://netflix-raw-123456-dev/netflix/silver/_SUCCESS/"
+QUARANTINE_SUCCESS_MARKER = "s3://netflix-raw-123456-dev/netflix/quarantine/_SUCCESS/"
 
 # -----------------------------
 # Read from Glue Data Catalog
