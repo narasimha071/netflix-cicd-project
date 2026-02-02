@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Netflix DataLake Automation with Auto-Cleanup - S3 -> EventBridge -> Glue Workflows (Silver + Gold)
+Description: Netflix DataLake Automation - S3 -> EventBridge -> Glue Workflows (Silver + Gold)
 
 Parameters:
   BucketName:
@@ -73,213 +73,12 @@ Parameters:
 Resources:
 
   # -----------------------------
-  # Lambda Execution Role for Cleanup
-  # -----------------------------
-  CleanupLambdaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: CleanupResourcesPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - glue:DeleteTrigger
-                  - glue:DeleteWorkflow
-                  - glue:DeleteCrawler
-                  - glue:DeleteJob
-                  - glue:DeleteDatabase
-                  - glue:GetTrigger
-                  - glue:GetWorkflow
-                  - glue:GetCrawler
-                  - glue:GetJob
-                  - glue:GetDatabase
-                  - events:DeleteRule
-                  - events:RemoveTargets
-                  - events:ListTargetsByRule
-                  - events:DescribeRule
-                  - iam:DeleteRole
-                  - iam:DeleteRolePolicy
-                  - iam:GetRole
-                  - iam:ListRolePolicies
-                Resource: "*"
-
-  # -----------------------------
-  # Lambda Function for Cleanup
-  # -----------------------------
-  CleanupLambdaFunction:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: NetflixDataLakeCleanup
-      Runtime: python3.11
-      Handler: index.lambda_handler
-      Role: !GetAtt CleanupLambdaRole.Arn
-      Timeout: 300
-      Code:
-        ZipFile: |
-          import boto3
-          import cfnresponse
-          import logging
-          
-          logger = logging.getLogger()
-          logger.setLevel(logging.INFO)
-          
-          glue = boto3.client('glue')
-          events = boto3.client('events')
-          iam = boto3.client('iam')
-          
-          def lambda_handler(event, context):
-              logger.info(f"Event: {event}")
-              
-              try:
-                  if event['RequestType'] == 'Delete':
-                      # Don't do anything on stack deletion
-                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
-                      return
-                  
-                  resources_to_clean = event['ResourceProperties']
-                  
-                  # Delete Glue Triggers
-                  for trigger in resources_to_clean.get('Triggers', []):
-                      try:
-                          glue.delete_trigger(Name=trigger)
-                          logger.info(f"Deleted Trigger: {trigger}")
-                      except glue.exceptions.EntityNotFoundException:
-                          logger.info(f"Trigger not found: {trigger}")
-                      except Exception as e:
-                          logger.warning(f"Error deleting trigger {trigger}: {str(e)}")
-                  
-                  # Delete Glue Workflows
-                  for workflow in resources_to_clean.get('Workflows', []):
-                      try:
-                          glue.delete_workflow(Name=workflow)
-                          logger.info(f"Deleted Workflow: {workflow}")
-                      except glue.exceptions.EntityNotFoundException:
-                          logger.info(f"Workflow not found: {workflow}")
-                      except Exception as e:
-                          logger.warning(f"Error deleting workflow {workflow}: {str(e)}")
-                  
-                  # Delete Glue Crawlers
-                  for crawler in resources_to_clean.get('Crawlers', []):
-                      try:
-                          glue.delete_crawler(Name=crawler)
-                          logger.info(f"Deleted Crawler: {crawler}")
-                      except glue.exceptions.EntityNotFoundException:
-                          logger.info(f"Crawler not found: {crawler}")
-                      except Exception as e:
-                          logger.warning(f"Error deleting crawler {crawler}: {str(e)}")
-                  
-                  # Delete Glue Jobs
-                  for job in resources_to_clean.get('Jobs', []):
-                      try:
-                          glue.delete_job(JobName=job)
-                          logger.info(f"Deleted Job: {job}")
-                      except glue.exceptions.EntityNotFoundException:
-                          logger.info(f"Job not found: {job}")
-                      except Exception as e:
-                          logger.warning(f"Error deleting job {job}: {str(e)}")
-                  
-                  # Delete Glue Databases
-                  for database in resources_to_clean.get('Databases', []):
-                      try:
-                          glue.delete_database(Name=database)
-                          logger.info(f"Deleted Database: {database}")
-                      except glue.exceptions.EntityNotFoundException:
-                          logger.info(f"Database not found: {database}")
-                      except Exception as e:
-                          logger.warning(f"Error deleting database {database}: {str(e)}")
-                  
-                  # Delete EventBridge Rules
-                  for rule in resources_to_clean.get('EventRules', []):
-                      try:
-                          # Remove targets first
-                          targets_response = events.list_targets_by_rule(Rule=rule)
-                          target_ids = [t['Id'] for t in targets_response.get('Targets', [])]
-                          if target_ids:
-                              events.remove_targets(Rule=rule, Ids=target_ids)
-                          
-                          # Delete rule
-                          events.delete_rule(Name=rule)
-                          logger.info(f"Deleted EventBridge Rule: {rule}")
-                      except events.exceptions.ResourceNotFoundException:
-                          logger.info(f"EventBridge Rule not found: {rule}")
-                      except Exception as e:
-                          logger.warning(f"Error deleting rule {rule}: {str(e)}")
-                  
-                  # Delete IAM Roles
-                  for role in resources_to_clean.get('IAMRoles', []):
-                      try:
-                          # Delete inline policies
-                          policies = iam.list_role_policies(RoleName=role)
-                          for policy in policies.get('PolicyNames', []):
-                              iam.delete_role_policy(RoleName=role, PolicyName=policy)
-                          
-                          # Delete role
-                          iam.delete_role(RoleName=role)
-                          logger.info(f"Deleted IAM Role: {role}")
-                      except iam.exceptions.NoSuchEntityException:
-                          logger.info(f"IAM Role not found: {role}")
-                      except Exception as e:
-                          logger.warning(f"Error deleting role {role}: {str(e)}")
-                  
-                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {
-                      'Message': 'Cleanup completed successfully'
-                  })
-                  
-              except Exception as e:
-                  logger.error(f"Error in cleanup: {str(e)}")
-                  cfnresponse.send(event, context, cfnresponse.FAILED, {
-                      'Message': str(e)
-                  })
-
-  # -----------------------------
-  # Custom Resource to Trigger Cleanup
-  # -----------------------------
-  CleanupCustomResource:
-    Type: Custom::CleanupResources
-    Properties:
-      ServiceToken: !GetAtt CleanupLambdaFunction.Arn
-      Triggers:
-        - SilverTriggerCrawler
-        - SilverTriggerJob
-        - GoldTriggerCrawler
-        - GoldTriggerJob
-      Workflows:
-        - !Ref SilverWorkflowName
-        - !Ref GoldWorkflowName
-      Crawlers:
-        - !Ref SilverCrawlerName
-        - !Ref GoldCrawlerName
-      Jobs:
-        - !Ref SilverJobName
-        - !Ref GoldJobName
-      Databases:
-        - !Ref SilverDatabase
-        - !Ref GoldDatabase
-      EventRules:
-        - RawUploadTriggerSilverRule
-        - SilverSuccessTriggerGoldRule
-      IAMRoles:
-        - NetflixGlueServiceRole
-        - NetflixEventBridgeInvokeGlueRole
-
-  # -----------------------------
   # IAM Role for Glue
   # -----------------------------
   GlueServiceRole:
     Type: AWS::IAM::Role
-    DependsOn: CleanupCustomResource
     Properties:
+      RoleName: NetflixGlueServiceRole
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -309,7 +108,6 @@ Resources:
   # -----------------------------
   SilverGlueDatabase:
     Type: AWS::Glue::Database
-    DependsOn: CleanupCustomResource
     Properties:
       CatalogId: !Ref AWS::AccountId
       DatabaseInput:
@@ -317,7 +115,6 @@ Resources:
 
   GoldGlueDatabase:
     Type: AWS::Glue::Database
-    DependsOn: CleanupCustomResource
     Properties:
       CatalogId: !Ref AWS::AccountId
       DatabaseInput:
@@ -328,7 +125,6 @@ Resources:
   # -----------------------------
   SilverCrawler:
     Type: AWS::Glue::Crawler
-    DependsOn: CleanupCustomResource
     Properties:
       Name: !Ref SilverCrawlerName
       Role: !GetAtt GlueServiceRole.Arn
@@ -346,7 +142,6 @@ Resources:
   # -----------------------------
   GoldCrawler:
     Type: AWS::Glue::Crawler
-    DependsOn: CleanupCustomResource
     Properties:
       Name: !Ref GoldCrawlerName
       Role: !GetAtt GlueServiceRole.Arn
@@ -364,7 +159,6 @@ Resources:
   # -----------------------------
   SilverGlueJob:
     Type: AWS::Glue::Job
-    DependsOn: CleanupCustomResource
     Properties:
       Name: !Ref SilverJobName
       Role: !GetAtt GlueServiceRole.Arn
@@ -389,7 +183,6 @@ Resources:
   # -----------------------------
   GoldGlueJob:
     Type: AWS::Glue::Job
-    DependsOn: CleanupCustomResource
     Properties:
       Name: !Ref GoldJobName
       Role: !GetAtt GlueServiceRole.Arn
@@ -414,14 +207,12 @@ Resources:
   # -----------------------------
   SilverWorkflow:
     Type: AWS::Glue::Workflow
-    DependsOn: CleanupCustomResource
     Properties:
       Name: !Ref SilverWorkflowName
 
   # Workflow Triggers for Silver
   SilverTriggerCrawler:
     Type: AWS::Glue::Trigger
-    DependsOn: CleanupCustomResource
     Properties:
       Name: SilverTriggerCrawler
       Type: ON_DEMAND
@@ -431,9 +222,7 @@ Resources:
 
   SilverTriggerJob:
     Type: AWS::Glue::Trigger
-    DependsOn: 
-      - SilverCrawler
-      - CleanupCustomResource
+    DependsOn: SilverCrawler
     Properties:
       Name: SilverTriggerJob
       Type: CONDITIONAL
@@ -452,13 +241,11 @@ Resources:
   # -----------------------------
   GoldWorkflow:
     Type: AWS::Glue::Workflow
-    DependsOn: CleanupCustomResource
     Properties:
       Name: !Ref GoldWorkflowName
 
   GoldTriggerCrawler:
     Type: AWS::Glue::Trigger
-    DependsOn: CleanupCustomResource
     Properties:
       Name: GoldTriggerCrawler
       Type: ON_DEMAND
@@ -468,9 +255,7 @@ Resources:
 
   GoldTriggerJob:
     Type: AWS::Glue::Trigger
-    DependsOn:
-      - GoldCrawler
-      - CleanupCustomResource
+    DependsOn: GoldCrawler
     Properties:
       Name: GoldTriggerJob
       Type: CONDITIONAL
@@ -489,8 +274,8 @@ Resources:
   # -----------------------------
   EventBridgeInvokeGlueRole:
     Type: AWS::IAM::Role
-    DependsOn: CleanupCustomResource
     Properties:
+      RoleName: NetflixEventBridgeInvokeGlueRole
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -515,7 +300,6 @@ Resources:
   # -----------------------------
   RawUploadTriggerSilverRule:
     Type: AWS::Events::Rule
-    DependsOn: CleanupCustomResource
     Properties:
       Name: RawUploadTriggerSilverRule
       EventPattern:
@@ -540,7 +324,6 @@ Resources:
   # -----------------------------
   SilverSuccessTriggerGoldRule:
     Type: AWS::Events::Rule
-    DependsOn: CleanupCustomResource
     Properties:
       Name: SilverSuccessTriggerGoldRule
       EventPattern:
@@ -568,15 +351,3 @@ Outputs:
   GoldWorkflowOut:
     Value: !Ref GoldWorkflowName
     Description: Gold Glue Workflow Name
-  
-  GlueServiceRoleArn:
-    Value: !GetAtt GlueServiceRole.Arn
-    Description: ARN of the Glue Service Role
-  
-  EventBridgeRoleArn:
-    Value: !GetAtt EventBridgeInvokeGlueRole.Arn
-    Description: ARN of the EventBridge Role
-  
-  CleanupFunctionArn:
-    Value: !GetAtt CleanupLambdaFunction.Arn
-    Description: ARN of the Cleanup Lambda Function
