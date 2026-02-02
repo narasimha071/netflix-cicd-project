@@ -36,7 +36,7 @@ Parameters:
 
   SilverJobName:
     Type: String
-    Default: netflix-sliver-job
+    Default: netflix-silver-job
 
   GoldJobName:
     Type: String
@@ -44,7 +44,7 @@ Parameters:
 
   SilverCrawlerName:
     Type: String
-    Default: sliver_converion_crawler
+    Default: silver_converion_crawler
 
   GoldCrawlerName:
     Type: String
@@ -64,7 +64,7 @@ Parameters:
 
   SilverJobScriptKey:
     Type: String
-    Default: scripts/sliver_job.py
+    Default: scripts/silver_job.py
 
   GoldJobScriptKey:
     Type: String
