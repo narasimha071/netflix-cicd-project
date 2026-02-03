@@ -14,10 +14,6 @@ Parameters:
     Type: String
     Default: netflix/silver/
 
-  GoldPrefix:
-    Type: String
-    Default: netflix/gold/
-
   SilverDatabase:
     Type: String
     Default: netflix_db
@@ -44,7 +40,7 @@ Parameters:
 
   SilverCrawlerName:
     Type: String
-    Default: silver_converion_crawler
+    Default: silver_conversion_crawler
 
   GoldCrawlerName:
     Type: String
@@ -57,10 +53,6 @@ Parameters:
   GoldWorkflowName:
     Type: String
     Default: Gold_workflow
-
-  ScriptLocationPrefix:
-    Type: String
-    Default: scripts/
 
   SilverJobScriptKey:
     Type: String
@@ -78,7 +70,6 @@ Resources:
   GlueServiceRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: NetflixGlueServiceRole
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -86,8 +77,10 @@ Resources:
             Principal:
               Service: glue.amazonaws.com
             Action: sts:AssumeRole
+
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+
       Policies:
         - PolicyName: NetflixGlueS3Access
           PolicyDocument:
@@ -132,7 +125,6 @@ Resources:
       Targets:
         S3Targets:
           - Path: !Sub s3://${BucketName}/${RawPrefix}
-      TablePrefix: ""
       SchemaChangePolicy:
         UpdateBehavior: UPDATE_IN_DATABASE
         DeleteBehavior: DEPRECATE_IN_DATABASE
@@ -149,7 +141,6 @@ Resources:
       Targets:
         S3Targets:
           - Path: !Sub s3://${BucketName}/${SilverPrefix}
-      TablePrefix: ""
       SchemaChangePolicy:
         UpdateBehavior: UPDATE_IN_DATABASE
         DeleteBehavior: DEPRECATE_IN_DATABASE
@@ -210,7 +201,6 @@ Resources:
     Properties:
       Name: !Ref SilverWorkflowName
 
-  # Workflow Triggers for Silver
   SilverTriggerCrawler:
     Type: AWS::Glue::Trigger
     Properties:
@@ -270,12 +260,11 @@ Resources:
         - JobName: !Ref GoldJobName
 
   # -----------------------------
-  # IAM Role for EventBridge to start Glue Workflows
+  # IAM Role for EventBridge -> Glue Workflows
   # -----------------------------
   EventBridgeInvokeGlueRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: NetflixEventBridgeInvokeGlueRole
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -318,9 +307,10 @@ Resources:
         - Arn: !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:workflow/${SilverWorkflowName}
           Id: StartSilverWorkflow
           RoleArn: !GetAtt EventBridgeInvokeGlueRole.Arn
+          Input: "{}"
 
   # -----------------------------
-  # EventBridge Rule #2 Silver Marker -> Gold Workflow
+  # EventBridge Rule #2 SUCCESS file -> Gold Workflow
   # -----------------------------
   SilverSuccessTriggerGoldRule:
     Type: AWS::Events::Rule
@@ -337,11 +327,12 @@ Resources:
               - !Ref BucketName
           object:
             key:
-              - prefix: !Sub ${SilverPrefix}_SUCCESS
+              - !Sub ${SilverPrefix}_SUCCESS
       Targets:
         - Arn: !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:workflow/${GoldWorkflowName}
           Id: StartGoldWorkflow
           RoleArn: !GetAtt EventBridgeInvokeGlueRole.Arn
+          Input: "{}"
 
 Outputs:
   SilverWorkflowOut:
