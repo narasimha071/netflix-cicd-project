@@ -1,8 +1,11 @@
 import sys
+import boto3
+
 from awsglue.utils import getResolvedOptions
 from awsglue.context import GlueContext
 from awsglue.job import Job
 from pyspark.context import SparkContext
+
 from pyspark.sql import functions as F
 from pyspark.sql.types import IntegerType
 from pyspark.sql.functions import col, trim, regexp_replace, upper
@@ -22,7 +25,7 @@ job.init(args["JOB_NAME"], args)
 # -----------------------------
 spark.conf.set("spark.sql.adaptive.enabled", "true")
 spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "true")
-spark.conf.set("spark.sql.shuffle.partitions", "200")  # tune based on size
+spark.conf.set("spark.sql.shuffle.partitions", "200")
 spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "true")
 spark.conf.set("spark.sql.broadcastTimeout", "600")
 
@@ -32,12 +35,14 @@ spark.conf.set("spark.sql.broadcastTimeout", "600")
 SOURCE_DB = "netflix_db"
 SOURCE_TABLE = "netflix_raw"
 
-SILVER_S3_PATH = "s3://netflix-raw-123456-dev/netflix/silver/"
-QUARANTINE_S3_PATH = "s3://netflix-raw-123456-dev/netflix/quarantine/"
+BUCKET_NAME = "netflix-raw-123456-dev"
 
-# ✅ Success markers (IMPORTANT)
-SILVER_SUCCESS_MARKER = "s3://netflix-raw-123456-dev/netflix/silver/_SUCCESS_MARKER/"
-QUARANTINE_SUCCESS_MARKER = "s3://netflix-raw-123456-dev/netflix/quarantine/_SUCCESS_MARKER/"
+SILVER_S3_PATH = f"s3://{BUCKET_NAME}/netflix/silver/"
+QUARANTINE_S3_PATH = f"s3://{BUCKET_NAME}/netflix/quarantine/"
+
+# ✅ SUCCESS marker file paths (NO trailing slash)
+SILVER_SUCCESS_KEY = "netflix/silver/_SUCCESS"
+QUARANTINE_SUCCESS_KEY = "netflix/quarantine/_SUCCESS"
 
 # -----------------------------
 # Read from Glue Data Catalog
@@ -52,9 +57,6 @@ df = dyf.toDF()
 # Helper cleaning functions
 # -----------------------------
 def clean_string(c):
-    """
-    Trim + remove unwanted extra spaces + normalize quotes.
-    """
     return (
         F.when(col(c).isNull(), F.lit(None))
         .otherwise(
@@ -69,9 +71,6 @@ def clean_string(c):
     )
 
 def null_if_empty(c):
-    """
-    Convert empty strings to null.
-    """
     return F.when(
         (col(c).isNull()) | (trim(col(c)) == ""), F.lit(None)
     ).otherwise(col(c))
@@ -266,26 +265,22 @@ df_invalid_repart = df_invalid.repartition(10)
 )
 
 # -----------------------------
-# ✅ SUCCESS MARKERS
+# ✅ Create SUCCESS marker FILES using boto3
 # -----------------------------
-marker_df = spark.createDataFrame([("SUCCESS",)], ["status"])
+s3 = boto3.client("s3")
 
-# ✅ Silver success marker
-(
-    marker_df
-    .repartition(1)
-    .write.mode("overwrite")
-    .format("text")
-    .save(SILVER_SUCCESS_MARKER)
+# ✅ Silver success marker (FILE)
+s3.put_object(
+    Bucket=BUCKET_NAME,
+    Key=SILVER_SUCCESS_KEY,
+    Body=b""
 )
 
-# ✅ Quarantine success marker
-(
-    marker_df
-    .repartition(1)
-    .write.mode("overwrite")
-    .format("text")
-    .save(QUARANTINE_SUCCESS_MARKER)
+# ✅ Quarantine success marker (FILE)
+s3.put_object(
+    Bucket=BUCKET_NAME,
+    Key=QUARANTINE_SUCCESS_KEY,
+    Body=b""
 )
 
 job.commit()
